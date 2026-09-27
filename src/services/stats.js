@@ -59,6 +59,11 @@ export function computeMemberLeaderboard(plans) {
   const map = new Map()
 
   plans.forEach((plan) => {
+    // 预算控制榜只统计填写了预算且存在花费记录的计划
+    const budget = Number(plan.budget) || 0
+    const spend = planTotalSpend(plan)
+    const budgetCountable = budget > 0 && (plan.records || []).length > 0
+
     ;(plan.members || []).forEach((m) => {
       if (!map.has(m.name)) {
         map.set(m.name, {
@@ -68,6 +73,9 @@ export function computeMemberLeaderboard(plans) {
           packingCount: 0,
           ratingSum: 0,
           ratingCount: 0,
+          budgetPlans: 0,
+          budgetSum: 0,
+          spendSum: 0,
         })
       }
       const entry = map.get(m.name)
@@ -83,6 +91,12 @@ export function computeMemberLeaderboard(plans) {
         entry.ratingSum += plan.summary.rating
         entry.ratingCount += 1
       }
+
+      if (budgetCountable) {
+        entry.budgetPlans += 1
+        entry.budgetSum += budget
+        entry.spendSum += spend
+      }
     })
   })
 
@@ -93,7 +107,23 @@ export function computeMemberLeaderboard(plans) {
     avgRating: e.ratingCount ? Math.round((e.ratingSum / e.ratingCount) * 10) / 10 : 0,
     // 出行达人综合分：出行次数权重更高，总结质量作为加成
     travelScore: e.trips * 10 + (e.ratingCount ? e.ratingSum / e.ratingCount : 0),
+    // 预算控制榜数据：结余 = 预算合计 − 花费合计，正数为结余、负数为超支
+    budgetPlans: e.budgetPlans,
+    budgetTotal: Math.round(e.budgetSum * 100) / 100,
+    spendTotal: Math.round(e.spendSum * 100) / 100,
+    balance: Math.round((e.budgetSum - e.spendSum) * 100) / 100,
   }))
+
+  // 预算控制榜：没有符合条件计划的成员不上榜；
+  // 按结余金额降序（结余多在前、超支在后），结余相同按结余率、出行次数排序
+  const budgetBoard = members
+    .filter((m) => m.budgetPlans > 0)
+    .sort(
+      (a, b) =>
+        b.balance - a.balance ||
+        b.balance / b.budgetTotal - a.balance / a.budgetTotal ||
+        b.trips - a.trips
+    )
 
   return {
     travelMasterBoard: [...members].sort(
@@ -102,5 +132,6 @@ export function computeMemberLeaderboard(plans) {
     luggageMasterBoard: [...members].sort(
       (a, b) => b.avgPackingRate - a.avgPackingRate || b.trips - a.trips
     ),
+    budgetBoard,
   }
 }
