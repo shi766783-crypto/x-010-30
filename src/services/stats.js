@@ -59,6 +59,11 @@ export function computeMemberLeaderboard(plans) {
   const map = new Map()
 
   plans.forEach((plan) => {
+    // 预算控制榜仅计入填写了预算且存在花费记录的计划
+    const budget = Number(plan.budget) || 0
+    const budgetQualified = budget > 0 && (plan.records || []).length > 0
+    const planSpend = budgetQualified ? planTotalSpend(plan) : 0
+
     ;(plan.members || []).forEach((m) => {
       if (!map.has(m.name)) {
         map.set(m.name, {
@@ -68,10 +73,19 @@ export function computeMemberLeaderboard(plans) {
           packingCount: 0,
           ratingSum: 0,
           ratingCount: 0,
+          budgetSum: 0,
+          spendSum: 0,
+          budgetPlanCount: 0,
         })
       }
       const entry = map.get(m.name)
       entry.trips += 1
+
+      if (budgetQualified) {
+        entry.budgetSum += budget
+        entry.spendSum += planSpend
+        entry.budgetPlanCount += 1
+      }
 
       const list = (plan.luggage || []).find((l) => l.memberId === m.id)
       if (list) {
@@ -86,14 +100,23 @@ export function computeMemberLeaderboard(plans) {
     })
   })
 
-  const members = [...map.values()].map((e) => ({
-    name: e.name,
-    trips: e.trips,
-    avgPackingRate: e.packingCount ? Math.round(e.packingSum / e.packingCount) : 0,
-    avgRating: e.ratingCount ? Math.round((e.ratingSum / e.ratingCount) * 10) / 10 : 0,
-    // 出行达人综合分：出行次数权重更高，总结质量作为加成
-    travelScore: e.trips * 10 + (e.ratingCount ? e.ratingSum / e.ratingCount : 0),
-  }))
+  const members = [...map.values()].map((e) => {
+    const balance = e.budgetSum - e.spendSum
+    return {
+      name: e.name,
+      trips: e.trips,
+      avgPackingRate: e.packingCount ? Math.round(e.packingSum / e.packingCount) : 0,
+      avgRating: e.ratingCount ? Math.round((e.ratingSum / e.ratingCount) * 10) / 10 : 0,
+      // 出行达人综合分：出行次数权重更高，总结质量作为加成
+      travelScore: e.trips * 10 + (e.ratingCount ? e.ratingSum / e.ratingCount : 0),
+      // 预算控制：仅统计填写预算且有花费记录的计划
+      budgetPlanCount: e.budgetPlanCount,
+      totalBudget: e.budgetSum,
+      totalSpend: e.spendSum,
+      balance,
+      savingRate: e.budgetSum ? balance / e.budgetSum : 0,
+    }
+  })
 
   return {
     travelMasterBoard: [...members].sort(
@@ -102,5 +125,9 @@ export function computeMemberLeaderboard(plans) {
     luggageMasterBoard: [...members].sort(
       (a, b) => b.avgPackingRate - a.avgPackingRate || b.trips - a.trips
     ),
+    // 预算控制榜：结余率高者靠前，相同时结余金额大者靠前；超支者排在最后
+    budgetMasterBoard: members
+      .filter((m) => m.budgetPlanCount > 0)
+      .sort((a, b) => b.savingRate - a.savingRate || b.balance - a.balance),
   }
 }
